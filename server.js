@@ -3,20 +3,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-try {
-  for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/\r?\n/)) {
-    const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (match && !process.env[match[1]]) process.env[match[1]] = match[2].replace(/^['"]|['"]$/g, '');
-  }
-} catch {}
-
 const PORT = Number(process.env.PORT || 4173);
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, 'data');
 const STATE_FILE = path.join(DATA_DIR, 'state.json');
 const EMPLOYER_PASSCODE = process.env.EMPLOYER_PASSCODE || '2014';
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://impotgazkxuiztdhuszs.supabase.co';
-const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 const sessions = new Set();
 
 function readState() {
@@ -54,7 +45,6 @@ function serveFile(req, res) {
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === 'GET' && req.url === '/api/config') return send(res, 200, { supabaseUrl: SUPABASE_URL, supabaseAnonKey: SUPABASE_ANON_KEY });
     if (req.method === 'GET' && req.url.split('?')[0] === '/api/state') return send(res, 200, readState() || {});
     if (req.method === 'PUT' && req.url === '/api/state') {
       const state = safeState(await readBody(req));
