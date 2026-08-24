@@ -40,7 +40,55 @@ if(idb)idb.onupgradeneeded=event=>event.target.result.createObjectStore('state')
 const dbReady=()=>idb?new Promise((resolve,reject)=>{idb.onsuccess=()=>resolve(idb.result);idb.onerror=reject;}):Promise.reject();
 function setSyncState(label,time=new Date()){syncState={label,time:time?new Intl.DateTimeFormat('en-US',{hour:'numeric',minute:'2-digit',second:'2-digit'}).format(time):''};const node=document.getElementById('syncStatus');if(node)node.textContent=syncState.time?`${syncState.label} · ${syncState.time}`:syncState.label;}
 async function saveLocal(){localStorage.setItem(key,JSON.stringify(data));try{const db=await dbReady(),tx=db.transaction('state','readwrite');tx.objectStore('state').put(data,'current');}catch{}}
-async function initCloud(){try{cloudInitError=null;cloudConfigured=false;const config=await fetch('/api/config').then(response=>response.json());if(!config.supabaseAnonKey)return;cloudConfigured=true;if(!window.supabase?.createClient)throw new Error('Supabase browser client unavailable');cloudClient=window.supabase.createClient(config.supabaseUrl,config.supabaseAnonKey);const auth=await cloudClient.auth.getSession();let session=auth.data.session;if(!session){const result=await cloudClient.auth.signInAnonymously();if(result.error)throw result.error;session=result.data.session;}cloudUserId=session?.user?.id||null;}catch(error){cloudClient=null;cloudUserId=null;cloudInitError=error;}}
+async function initCloud() {
+    try {
+        cloudInitError = null;
+        cloudConfigured = false;
+
+        const SUPABASE_URL = https://impotgazkxuiztdhuszs.supabase.co/rest/v1/;
+        const SUPABASE_ANON_KEY = sb_publishable_x-nYlx23X5Tx9KclWb5s1Q_zGPbdeIM;
+
+        if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+            throw new Error('Supabase configuration missing');
+        }
+
+        if (!window.supabase?.createClient) {
+            throw new Error('Supabase browser client unavailable');
+        }
+
+        cloudConfigured = true;
+
+        cloudClient = window.supabase.createClient(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY
+        );
+
+        const auth = await cloudClient.auth.getSession();
+        let session = auth.data.session;
+
+        if (!session) {
+            const result = await cloudClient.auth.signInAnonymously();
+
+            if (result.error) {
+                throw result.error;
+            }
+
+            session = result.data.session;
+        }
+
+        cloudUserId = session?.user?.id || null;
+
+        if (!cloudUserId) {
+            throw new Error('Supabase user was not created');
+        }
+
+    } catch (error) {
+        cloudClient = null;
+        cloudUserId = null;
+        cloudInitError = error;
+        console.error('Supabase initialization failed:', error);
+    }
+}
 const save=async()=>{await saveLocal();if(cloudClient&&cloudUserId){const result=await cloudClient.from('flyer_tracker_state').upsert({id:'primary',owner_id:cloudUserId,state:data,updated_at:new Date().toISOString()},{onConflict:'id'});const label=document.getElementById('syncLabel');if(label)label.textContent=result.error?'Offline — saved locally':'Synced to Supabase';}else{fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(()=>{const label=document.getElementById('syncLabel');if(label)label.textContent='Saved online';}).catch(()=>{const label=document.getElementById('syncLabel');if(label)label.textContent='Offline — saved locally';});}};
 function mergeCloudState(local,remote){const merged={...remote,...local,addresses:[...(remote.addresses||[])]};const byId=new Map(merged.addresses.map(address=>[address.id,address]));for(const localAddress of local.addresses||[]){const cloudAddress=byId.get(localAddress.id);if(!cloudAddress){byId.set(localAddress.id,localAddress);continue;}const events=new Map((cloudAddress.events||[]).map(event=>[`${event.sessionKey||''}|${event.at}|${event.action}|${event.userId||''}`,event]));for(const event of localAddress.events||[])events.set(`${event.sessionKey||''}|${event.at}|${event.action}|${event.userId||''}`,event);byId.set(localAddress.id,{...cloudAddress,...localAddress,events:[...events.values()].sort((a,b)=>new Date(a.at)-new Date(b.at))});}merged.addresses=[...byId.values()];merged.users=[...(remote.users||[])];const users=new Map(merged.users.map(item=>[item.id,item]));for(const item of local.users||[])users.set(item.id,item);merged.users=[...users.values()];return merged;}
 async function syncNow(){if(syncInFlight)return;if(!navigator.onLine){setSyncState('Offline',null);return;}syncInFlight=true;setSyncState('Syncing...',null);try{await saveLocal();await initCloud();if(cloudClient&&cloudUserId){const result=await cloudClient.from('flyer_tracker_state').select('state').eq('owner_id',cloudUserId).eq('id','primary').maybeSingle();if(result.error)throw result.error;if(result.data?.state)data=mergeCloudState(data,result.data.state);const write=await cloudClient.from('flyer_tracker_state').upsert({id:'primary',owner_id:cloudUserId,state:data,updated_at:new Date().toISOString()},{onConflict:'id'});if(write.error)throw write.error;}else{const response=await fetch('/api/state');if(!response.ok)throw new Error('State request failed');const remote=await response.json();if(remote.addresses?.length)data=mergeCloudState(data,remote);const write=await fetch('/api/state',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!write.ok)throw new Error('State upload failed');}await saveLocal();setSyncState('Synced');layout();}catch{setSyncState('Sync Error',null);}finally{syncInFlight=false;}}
